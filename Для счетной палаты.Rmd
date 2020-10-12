@@ -1,0 +1,364 @@
+---
+title: "Мониторинг vs. bus.gov.ru"
+output:
+  html_document:
+    df_print: paged
+    number_sections: no
+    self_contained: yes
+    smooth_scroll: no
+    toc: yes
+    toc_depth: 1
+    toc_float: yes
+    toc_position: right
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r пакеты, include=FALSE}
+#library(prettydoc)
+#devtools::install_github("haozhu233/kableExtra")
+library(rmdformats)
+library(plyr)
+library(ggforce)
+library(knitr)
+library(kableExtra)
+library(dplyr)
+library(readr)
+library(fBasics)
+library(formattable)
+library(plotrix)
+library(tidyr)
+library(readxl)
+library(stringr)
+library(ggplot2)
+library(tidyverse)
+library(plotly)
+library(patchwork)
+library(ggsignif)
+library(concaveman)
+library(DT)
+library(MissMech)
+library(waffle)
+library(openxlsx)
+```
+
+
+```{r данные}
+finance_table_all <- read_excel("data/finance_table_all.xlsx")
+df <- finance_table_all
+nm <- colnames(finance_table_all)
+nm1 <- nm[4:51]
+
+df[nm1] <- lapply(df[nm1], function(x) gsub(",", ".", x))
+df[nm1] <- lapply(df[nm1], function(x) as.numeric(gsub("[[:space:]]", "", x)))
+
+merged_final <- df %>% 
+  #dplyr::filter(code_010_100_totalEndYear > 0) %>% 
+  replace(is.na(.), 0) %>% 
+  mutate(short_name = gsub("\"", "_", agencyName),
+                      short_name = gsub("^.*\\ _", "", short_name),
+                      short_name = gsub("_", "", short_name))
+
+#availableMeansEndYear - Приносящая доход деятельность
+#budgetActivityEndYear - Деятельность с целевыми средствами
+#incomeActivityEndYear -Деятельность по государственному заданию
+#totalEndYear - Итого
+#<br/><br/>
+
+# CЕМЕЙСТВА
+
+finance_table_all <- read_excel("data/finance_table_all.xlsx")
+
+df <- finance_table_all
+nm <- colnames(finance_table_all)
+nm1 <- nm[4:51]
+
+df[nm1] <- lapply(df[nm1], function(x) gsub(",", ".", x))
+df[nm1] <- lapply(df[nm1], function(x) as.numeric(gsub("[[:space:]]", "", x)))
+
+merged_final <- df %>% 
+  #dplyr::filter(code_010_100_totalEndYear > 0) %>% 
+  replace(is.na(.), 0)
+
+rm(df,finance_table_all)
+rm(nm,nm1)
+
+additional_variables_coded <- read_excel("data/additional_variables_coded.xlsx")
+additional_variables_coded <-  additional_variables_coded %>% mutate(family_profile2 = family_profile)
+additional_variables_coded$family_profile <- car::recode(additional_variables_coded$family_profile,"'1'='Аграрные';
+                           '2'='Культуры и искусств';
+                           '3'='Технические';
+                           '4'='Социально-экономические';
+                           '5'='Медицинские';
+                           '6'='Педагогические';
+                           '7'='Классические';
+                           '8'='Силовые и спортивные';
+                           '9'='Муниципальные';
+                           '10'='Частные'
+                           ")
+additional_variables_coded <- additional_variables_coded %>% select(1,5,14)
+
+agencies_with_inn <- read_excel("data/agencies_with_inn.xlsx")
+agencies_with_inn <- agencies_with_inn %>% select(1,3,4)
+
+merged <- left_join(merged_final, agencies_with_inn, by = "agencyId")
+
+merged_final <- left_join(merged, additional_variables_coded, by = c("id_monitoring"="id"))
+
+merged_final <- merged_final %>% mutate(family_profile2 = 
+                               case_when(agencyId == 280558 | agencyId ==  280252 ~ 7,
+                                         agencyId == 284459 | agencyId ==  531526 ~ 3,
+                                         agencyId == 285206 | agencyId ==  284151 ~ 9,
+                                         agencyId == 144722 ~ 4,
+                                         TRUE   ~  family_profile2)
+                             ) %>% 
+  mutate(family_profile = case_when(family_profile2 == "7" ~ "Классические",
+                                    family_profile2 == "3" ~ "Технические",
+                                    family_profile2 == "9" ~ "Муниципальные", 
+                                    family_profile2 == "4" ~ "Социально-экономические",
+                                    TRUE   ~  family_profile)
+         )
+
+merged_final <- merged_final %>%  mutate(short_name = gsub("\"", "_", agencyName),
+                      short_name = gsub("^.*\\ _", "", short_name),
+                      short_name = gsub("_", "", short_name))
+
+# РЕГИОН
+
+regions <- read_csv("data/regions.csv")
+regions <- regions %>% select(-1)
+
+merged_final <- left_join(merged_final, regions, by = c("id_monitoring"="id"))
+
+merged_final[merged_final$short_name == "ФЕДЕРАЛЬНОЕ ГОСУДАРСТВЕННОЕ АВТОНОМНОЕ ОБРАЗОВАТЕЛЬНОЕ УЧРЕЖДЕНИЕ ВЫСШЕГО ОБРАЗОВАНИЯ ПЕРВЫЙ МОСКОВСКИЙ ГОСУДАРСТВЕННЫЙ МЕДИЦИНСКИЙ УНИВЕРСИТЕТ ИМЕНИ И.М. СЕЧЕНОВА МИНИСТЕРСТВА ЗДРАВООХРАНЕНИЯ РОССИЙСКОЙ ФЕДЕРАЦИИ (СЕЧЕНОВСКИЙ УНИВЕРСИТЕТ)", "short_name"] <- "МОСКОВСКИЙ ГОСУДАРСТВЕННЫЙ МЕДИЦИНСКИЙ УНИВЕРСИТЕТ ИМЕНИ И.М. СЕЧЕНОВА"
+
+
+monitoring_data_site <- read_excel("data/monitoring_data_site.xlsx")
+
+viborka <- left_join(agencies_with_inn, additional_variables_coded, by = c("id_monitoring"="id"))
+
+rm(regions, merged)
+rm(agencies_with_inn,additional_variables_coded)
+
+```
+
+
+```{r}
+monit <- monitoring_data_site %>% select(id,7,8,
+                                         income_all_2017,
+                                         income_all_2018,
+                                         income_all_2019)
+
+merg <- merged_final %>% select(code_010_100_totalEndYear,
+                                short_name, 
+                                id_monitoring
+                                )
+full_tab <- left_join(monit, merg, by = c("id"="id_monitoring"))
+
+full_tab[full_tab$id == "110339","name_mon_2019"] <- full_tab[full_tab$id == "110339","name_mon_2018"]
+full_tab[full_tab$id == "110740","name_mon_2019"] <- full_tab[full_tab$id == "110740","name_mon_2018"]
+full_tab <- full_tab %>% select(-name_mon_2018)
+nm <- colnames(full_tab)
+nm <- nm[3:5]
+
+full_tab[nm] <- lapply(full_tab[nm], function(x) gsub(",", ".", x))
+full_tab[nm] <- lapply(full_tab[nm], function(x) as.numeric(gsub("[[:space:]]", "", x)))
+full_tab[nm] <- lapply(full_tab[nm], function(x) x*1000)
+
+full_tab <- full_tab %>%  filter(!is.na(name_mon_2019))
+
+gos_vuz <- viborka$id_monitoring
+
+full_tab <- subset(full_tab, id %in% gos_vuz)
+
+rm(list=setdiff(ls(), "full_tab"))
+
+full_tab[full_tab$id == "97","income_all_2019"]<- 435138800
+colnames(full_tab)[1] <- "id_Monit"
+colnames(full_tab)[4] <- "Monit_on_end_2017"
+colnames(full_tab)[5] <- "Monit_on_end_2018"
+colnames(full_tab)[6] <- "BusGov_on_end_2018"
+
+
+full_tab <- full_tab %>% mutate(Monit_on_end_2017 = Monit_on_end_2017/1000000,
+                                Monit_on_end_2018 = Monit_on_end_2018/1000000,
+                                BusGov_on_end_2018 = BusGov_on_end_2018/1000000) 
+
+#фильтры, которые убрали 70 вузов:
+
+#merged_final %>% 
+  #filter(agencyId != 164804, agencyId != 154506, agencyId != 183965) %>%
+ #dplyr::filter(code_010_100_totalEndYear > 0)  
+```
+
+
+# Что мы хотим
+
+На __сайте bus.gov.ru__ обнаужены отчеты о результатах финансово-хозяйственной деятельности __462 вузов__ (отчеты на конец 2018 года).
+
+По данным __Мониторинга__  мы знаем о доходах __499__ государственных вузов (без филиалов) (так же на конец 2018 года). 
+
+Четыре пункта на которые мы посмотрим:
+
+1) проблемы которые есть в  отчетах bus.gov.ru
+
+2) вузы данные о доходах котрых есть в Мониторинге, но нет на bus.gov
+
+3) вузы данные о доходах котрых есть на bus.gov, но нет в Мониторинге
+
+4) данные есть и в Мониторинге и на bus.gov, но совпадают ли онин
+
+
+# Проблемы в отчетах bus.gov {-}
+
+Если из 499 вузов Мониторинга все данные о доходах выглядят правдоподобно, то вот из 462 скаченных отчетов с bus.gov есть очевидно ошибочные отчеты. Например, есть вузы, которые подали отчеты такого вида:
+
+<iframe width='100%' height='400' src='https://bus.gov.ru/public/print-form/show.html?pfid=27825296' >
+  <p>Your browser does not support iframes</p>
+</iframe>
+
+Всего 69 вузов из 462 подгрузили на сайт отчеты, где в строчке Общие доходы (строка 010 100 столбец Итого) у них стоит ноль.Таким образом опубликовали отчеты 462 вуза, но только у 393 в данных о доходах стоит какое-то число. 
+
+Список из 69 вузов с нулевыми отчетами на bus.gov:
+
+### Таблица 1 (в млн руб.) {#tab1}
+
+```{r}
+full_tab %>% filter(BusGov_on_end_2018 == 0) %>% select(2,4,5,6) %>% datatable(options = list(pageLength = 5))
+```
+
+
+
+# Есть в Мониторинге, нет на bus.gov {-}
+
+Список из 39 вузов у которых нет отчетов за 2018 год на bus.gov:
+
+### Таблица 2 (в млн руб.){#tab2}
+```{r}
+full_tab %>% filter(is.na(BusGov_on_end_2018)) %>% mutate(BusGov_on_end_2018 = "NA") %>% 
+  select(2,4,5,6) %>% 
+  datatable(options = list(pageLength = 5)) 
+```
+
+Основноая причина почему у нас отчеты этих вузов не спарсились, это потому что вузы их просто не публикуют на bus.gov. Вот несколько принтскринов с примерами:
+
+1. У Северо-Осетинского государственного педагогического института опубликованы отчеты только за 2014 и 2015 (в мониторинге же данные есть, [см. Таб 2](#tab2))
+
+![](note/scr1.png)
+
+2. У Дагестанского государственного университета народного хозяйства опубликован отчет только за 2017 год (в мониторинег данные есть, [см. Таб 2](#tab2))
+
+![](note/scr3.png)
+
+Есть еще одна причина, почему у нас может не оказаться отчета вуза с сайта bus.gov . Мы скачивали отчеты за 2018 год с сайта bus.gov в апреле 2020 года. В нашей выборке есть следующий случай:
+
+![](note/scr4.png)
+
+Отчет за 2018 год вроде бы висит на сайте, но есть присмотреться, то видно, что дата его публикации - 01.07.2020. То есть вуз опубликовал отчет с опозданием на пару лет и когда мы в апреле 2020 скачивали отчеты он еще не был вывешен. 
+
+# Есть на bus.gov, нет в Мониторинге {-}
+
+Таких вуза всего два. ТОЛЬЯТТИНСКАЯ КОНСЕРВАТОРИЯ и НАБЕРЕЖНОЧЕЛНИНСКИЙ ГОСУДАРСТВЕННЫЙ ТОРГОВО-ТЕХНОЛОГИЧЕСКИЙ ИНСТИТУТ не ищутся в Мониторинге 2019 (это и есть на конец 2018 года), но при этом эти вузы есть на bus.gov.ru и они опубликовали там отчеты. Кроме того, В Мониторинег годом ранее эти вузы есть и данные они предоставляли. 
+
+
+### Таблица 3 (млн руб.) {#tab3}
+```{r}
+full_tab %>% filter(is.na(Monit_on_end_2018)) %>% mutate(Monit_on_end_2018 = "NA") %>% 
+  select(2,4,5,6) %>% 
+  datatable(options = list(pageLength = 5)) 
+```
+
+# Есть везде, но совпадают ли? {-}
+
+
+Последовательно делаем следующее:
+
+1) Выкинем 2 вуза, которые есть на bus.gov, но нет в Мониторинге. 
+2) Выкинем 39 вузов которые есть в Мониторинге, но нет на bus.gov.
+3) Выкинем 69 вузов которые есть в Мониторинге, но на bus.gov они подгрузили нудевые отчеты.
+4) Посчитаем $diff = \frac{Monit\_on\_end\_2018}{BusGov\_on\_end\_2018}*100$
+
+### Таблица 4 (млн руб.) {#tab4}
+```{r}
+full_tab %>% filter(!is.na(Monit_on_end_2018) & !is.na(BusGov_on_end_2018) & BusGov_on_end_2018 >0) %>% 
+  mutate(`diff(%)` = Monit_on_end_2018/BusGov_on_end_2018*100) %>% 
+  select(short_name,4,5,6,8) %>% arrange(desc(`diff(%)`)) %>% 
+  datatable(options = list(pageLength = 5)) %>% formatRound(columns=c(3:6), digits=1, interval = 0, mark = "") 
+```
+
+
+```{r, eval=FALSE}
+full_tab %>% filter(!is.na(Monit_on_end_2018) & !is.na(BusGov_on_end_2018) & BusGov_on_end_2018 >0) %>% 
+  mutate(diff = case_when(Monit_on_end_2018>BusGov_on_end_2018 ~ paste0("завышено в ", round(Monit_on_end_2018/BusGov_on_end_2018,digits = 2), " раз"),
+                          TRUE ~ paste0("занижено в ", round(BusGov_on_end_2018/Monit_on_end_2018,digits = 2), " раз"))) %>% 
+  select(short_name,4,5,6,8) %>% arrange(desc(diff)) %>% 
+  datatable(options = list(pageLength = 5)) %>% formatRound(columns=c(2:4), digits=1, interval = 0, mark = "") 
+```
+
+
+В таб. 4 мы сразу видим аномалии. МОСКОВСКИЙ ТЕХНИЧЕСКИЙ УНИВЕРСИТЕТ СВЯЗИ И ИНФОРМАТИКИ в Мониторинге за 2018 год заявил доходы 1408 руб. При этом на bus.gov вуз заявил доходы за 2018 год 22 млн. руб. Так как мы видим, что данные в Мониторинге более реалистичны и последовательны (смотрим что вуз заявлял в 2017 в Мониторинге), то проверим в чем может быть причина на сайте bus.gov. Смотрим оригинальный отчет вуза на bus.gov: 
+
+##### Отчеты МОСКОВСКОГО ТЕХНИЧЕСКОГО УНИВЕРСИТЕТА СВЯЗИ И ИНФОРМАТИКИ с bus.gov {.tabset .tabset-fade .tabset-pills}
+
+###### 2018 
+<iframe width='100%' height='400' src='https://bus.gov.ru/public/print-form/show.html?pfid=27785804' >
+  <p>Your browser does not support iframes</p>
+</iframe>
+
+
+###### 2017
+
+<iframe width='100%' height='400' src='https://bus.gov.ru/public/print-form/show.html?pfid=20115496' >
+  <p>Your browser does not support iframes</p>
+</iframe>
+
+####
+
+Мы смотрим на сторчку  010 100 столбец Итого. В 2018 году действительно заявлено 22 млн. При этом в 2017 заявлено 1372 млн. - а это уже очень похоже на данные Мониторинга. Короче посчитаем это какой-то аномалией с которой мы сможем разобраться только если позвоним в бухгалтерию этого вуза. Уберем его из выборки и посмотрим на обзее распределение всех вузов из [Табл. 4](#tab4).
+
+### Рис 1 {#ris1}
+```{r}
+r1 <- full_tab %>% filter(!is.na(Monit_on_end_2018) & !is.na(BusGov_on_end_2018) & BusGov_on_end_2018 >0) %>% 
+  mutate(diff = Monit_on_end_2018/BusGov_on_end_2018*100) %>% select(id_Monit,  diff) %>% 
+  filter(id_Monit != 1593) %>% #filter(diff < 200) %>% 
+  gather(key=id_Monit, value=Value)  
+
+
+r1 %>% ggplot(aes(Value, fill = id_Monit)) +
+  geom_histogram(position = "identity", alpha = 0.85, fill = "#dd4930") +
+  geom_vline(aes(xintercept = mean(Value)),col='black',size=0.3, linetype = 5)+
+  geom_text(aes(y=160, x=150,label='mean = 101,5% \n med = 100,2%'), size=3.5) +
+  labs(
+    x = "diff (%)",
+    y = "Число вузов", 
+    fill = NULL
+  )  + theme_bw()+
+  theme(legend.position = 'none',
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank()) 
+```
+
+Мы видим, что в среднем данные в мониторинге соответстветствуют данным на bus.gov, но это только в среднем. Все вузы, что у нас на графике левее 100, это вузы которые заявили на сайте bus.gov доходы выше, чем в мониторинге. Например, см. [табл.4](#tab4) отсортированную по _diff_ в порядке возрастнания. ВСЕРОССИЙСКИЙ ГОСУДАРСТВЕННЫЙ УНИВЕРСИТЕТ ЮСТИЦИИ на bus.gov заявил доход 2047 млн. а в мониторинге только 23% от этой суммы - 474 млн. Сортируем [табл.4](#tab4) _diff_ в порядке убывания и видим КОМСОМОЛЬСКИЙ-НА-АМУРЕ ГОСУДАРСТВЕННЫЙ УНИВЕРСИТЕТ, который в Мониторинге заявил доход 1016 млн. и это 475% заявленной на bus.gov суммы - на bus.gov заявлено 213 млн доходов. 
+
+# Вывод
+
+1) В мониторинге заполняемость лучше. В bus.gov - гараздо подробнее разбивка. Финансовые показатели по мониторингу почти что бесполезны в отличии от финансовых отчетов с bus.gov. 
+
+2) Вузы более халатно относятся выгрузке отчетов на bus.gov -  кто-то подгружает их просто так, просто с нулями, видимо в надежде что их никто не откроет?
+
+```{r}
+tab_end <- read_csv("data/tab_end.csv")
+knitr::kable(tab_end , booktabs = T, digits = 0) %>%
+ kable_styling() %>% 
+row_spec(3, bold = TRUE) 
+
+```
+
+3) Нельзя сказать в какой базе более завышенные доходы, а в какой более занижены. В среднем данные мониторинга это почти 100% данные bus.gov, но на [рис 1](#ris1) мы видим гистограмму, которая говорит нам, что смещение есть в обе стороны - кто-то предоставляет более завышенные данные в bus.gov, кто-то в Мониторинге. 
+
+4) Есть сильные аномалии, причем они связаны скорее с сайтом bus.gov в сторону занижения. То есть МОСКОВСКИЙ ТЕХНИЧЕСКИЙ УНИВЕРСИТЕТ СВЯЗИ И ИНФОРМАТИКИ, который на bus.gov заявил 22 млн, а в Мониторинге 1408 млн. то есть __занижение__ в мониторинге в ~63 раза (6309% из [табл.4](#tab4)). Случаи за __завышения__ тоже есть, но максимальное завышение в ~4 раза во ВСЕРОССИЙСКОМ ГОСУДАРСТВЕННОМ УНИВЕРСИТЕТЕ ЮСТИЦИИ ([табл.4](#tab4)): 2047 млн заявлено на bus.gov и 474 млн в Мониторинге
+
